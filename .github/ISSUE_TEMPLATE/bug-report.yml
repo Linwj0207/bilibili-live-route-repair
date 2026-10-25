@@ -1,0 +1,40 @@
+name: 播放失败 / 兼容性反馈
+description: 提供已脱敏的现象和环境，帮助判断是否命中本项目处理的线路。
+title: '[问题] '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。这里是公开页面，请不要上传 Cookie、访问令牌、完整媒体播放 URL 或未经脱敏的日志。截图请遮挡账号等私人信息。
+  - type: input
+    id: environment
+    attributes:
+      label: 大致地区与网络类型
+      description: 例如德国 / 移动网络经 CPE；不需要提供 IP、住址或账号。
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: 浏览器、脚本管理器和本脚本版本
+    validations:
+      required: true
+  - type: textarea
+    id: symptoms
+    attributes:
+      label: 出现什么问题？
+      description: 报错、左下角提示、是否所有直播都失败；普通投稿视频是否正常。
+    validations:
+      required: true
+  - type: textarea
+    id: comparison
+    attributes:
+      label: 对比和已尝试操作
+      description: 关闭本脚本并刷新后的情况、其他直播加速是否关闭、是否试过不同网络。若已经恢复，可补充持续播放了多久。
+    validations:
+      required: true
+  - type: input
+    id: room
+    attributes:
+      label: 直播间网页地址或房间号（可选）
+      description: 只填 live.bilibili.com 的网页地址；不要填包含签名的媒体 URL。

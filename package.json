@@ -1,0 +1,18 @@
+{
+  "name": "bilibili-live-route-repair",
+  "version": "0.2.1",
+  "private": true,
+  "description": "Experimental fallback CDN repair for some Bilibili web live-stream startup failures overseas.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Linwj0207/bilibili-live-route-repair.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node --check bilibili-live-route-repair.user.js",
+    "test": "node tests/route-repair.test.cjs"
+  }
+}
