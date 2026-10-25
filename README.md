@@ -1,4 +1,4 @@
-# Bilibili Live Route Repair · B站海外直播线路修复
+# B站海外直播线路修复（Bilibili Live Route Repair）
 
 用于**部分海外网络下，B站网页直播起播失败**的实验性油猴脚本。保留原来的直播格式、编码、画质和服务器列表，为特定 fMP4 线路加入一个备用 CDN。
 
