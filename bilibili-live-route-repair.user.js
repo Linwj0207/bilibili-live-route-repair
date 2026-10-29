@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         B站海外直播线路修复
 // @namespace    https://github.com/Linwj0207/bilibili-live-route-repair
-// @version      0.2.1
-// @description  保留原直播格式和画质，仅给故障 fMP4 线路添加备用 CDN；不保证所有网络适用。
+// @version      0.3.0
+// @description  优先使用 B站接口当次提供的官方 FLV 直播线路，保留该线路原有画质、编码与播放地址；不保证所有网络适用。
 // @match        https://live.bilibili.com/*
 // @run-at       document-start
 // @grant        none
@@ -18,12 +18,19 @@
 
 (() => {
   'use strict';
-  if (location.hostname !== 'live.bilibili.com') return;
+  const LIVE_ORIGIN = 'https://live.bilibili.com';
+  function isLiveContext() {
+    if (location.hostname === 'live.bilibili.com') return true;
+    // The event page can create a same-origin blank iframe, then write the live
+    // player document into it. Hook that window before its playback code runs.
+    if (location.href !== 'about:blank' && location.href !== 'about:srcdoc') return false;
+    try { return window.parent !== window && window.parent.location.hostname === 'live.bilibili.com'; }
+    catch { return false; }
+  }
+  if (!isLiveContext()) return;
   const FLAG = '__biliLiveRouteRepairV1';
   if (window[FLAG]) return;
-  const stats = { version: '0.2.1', apiResponsesChanged: 0, embeddedResponsesChanged: 0 };
-  const BACKUP_ORIGIN = 'https://d1--cn-gotcha204.bilivideo.com';
-  const FAILED_FMP4_HOSTS = new Set(['d1--ov-gotcha207.bilivideo.com', 'd1--ov-gotcha207b.bilivideo.com']);
+  const stats = { version: '0.3.0', apiResponsesChanged: 0, embeddedResponsesChanged: 0 };
   Object.defineProperty(window, FLAG, { value: Object.freeze({ status: () => ({ ...stats }) }) });
 
   const CHANNEL = 'bili-live-route-repair-v1';
@@ -34,7 +41,7 @@
     if (window !== window.top || !document.body) return;
     badge ||= Object.assign(document.createElement('div'), { id: 'bili-live-route-repair-status' });
     badge.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:2147483646;padding:7px 11px;border-radius:6px;background:#18242ee8;color:#fff;font:12px/1.5 sans-serif;pointer-events:none;max-width:260px;';
-    badge.textContent = changesSeen ? '直播线路修复 0.2.1：已加入 fMP4 备用节点' : '直播线路修复 0.2.1：等待直播播放地址';
+    badge.textContent = changesSeen ? '直播线路修复 0.3：已选用官方 FLV 线路' : '直播线路修复 0.3：等待直播播放地址';
     if (!badge.isConnected) document.body.append(badge);
     clearTimeout(badgeTimer);
     badgeTimer = setTimeout(() => badge.remove(), 18000);
@@ -44,12 +51,12 @@
     changesSeen += 1;
     if (window === window.top) showStatus();
     else {
-      try { window.top.postMessage({ channel: CHANNEL, changed: true }, location.origin); } catch {}
+      try { window.top.postMessage({ channel: CHANNEL, changed: true }, LIVE_ORIGIN); } catch {}
     }
   }
   if (window === window.top) {
     window.addEventListener('message', event => {
-      if (event.origin === location.origin && event.data?.channel === CHANNEL && event.data.changed === true) {
+      if (event.origin === LIVE_ORIGIN && event.data?.channel === CHANNEL && event.data.changed === true) {
         changesSeen += 1;
         showStatus();
       }
@@ -60,7 +67,7 @@
 
   function isPlayInfoUrl(value) {
     try {
-      const url = new URL(String(value), location.href);
+      const url = new URL(String(value), document.baseURI || location.href);
       return url.protocol === 'https:' && url.hostname === 'api.live.bilibili.com'
         && /^\/xlive\/web-room\/v\d+\/index\/getRoomPlayInfo$/.test(url.pathname);
     } catch { return false; }
@@ -74,35 +81,37 @@
     } catch { return ''; }
   }
 
-  function addFmp4Backup(payload) {
+  function usableFlvCodec(codec) {
+    return codec?.codec_name === 'avc' && typeof codec.base_url === 'string'
+      && codec.base_url.startsWith('/live-bvc/') && Array.isArray(codec.url_info)
+      && codec.url_info.length > 0 && codec.url_info.every(info =>
+        /(^|\.)bilivideo\.(com|cn|net)$/.test(mediaHost(info)) && typeof info.extra === 'string');
+  }
+
+  function preferNativeFlv(payload) {
     const playurl = payload?.data?.playurl_info?.playurl
       || payload?.result?.playurl_info?.playurl || payload?.playurl_info?.playurl;
     if (!playurl || !Array.isArray(playurl.stream) || (payload.code != null && payload.code !== 0)) return false;
-    let changed = false;
+    const selected = [];
     for (const stream of playurl.stream) {
-      if (stream.protocol_name !== 'http_hls' || !Array.isArray(stream.format)) continue;
-      for (const format of stream.format) {
-        if (format.format_name !== 'fmp4' || !Array.isArray(format.codec)) continue;
-        for (const codec of format.codec) {
-          if (typeof codec.base_url !== 'string' || !codec.base_url.startsWith('/live-bvc/') || !Array.isArray(codec.url_info)) continue;
-          if (codec.url_info.some(info => mediaHost(info) === 'd1--cn-gotcha204.bilivideo.com')) continue;
-          const original = codec.url_info.find(info => FAILED_FMP4_HOSTS.has(mediaHost(info)) && typeof info.extra === 'string');
-          if (!original) continue;
-          // Keep every protocol, format, codec, quality and original fallback. Only prepend
-          // a same-format official CDN whose playlist and fragments were checked separately.
-          codec.url_info = [{ ...original, host: BACKUP_ORIGIN }, ...codec.url_info];
-          changed = true;
-        }
-      }
+      if (stream?.protocol_name !== 'http_stream' || !Array.isArray(stream.format)) continue;
+      const formats = stream.format.filter(format => format?.format_name === 'flv'
+        && Array.isArray(format.codec) && format.codec.some(usableFlvCodec));
+      if (formats.length) selected.push(formats.length === stream.format.length ? stream : { ...stream, format: formats });
     }
-    return changed;
+    // Select the stream returned for this request. Keep its codecs, quality choices,
+    // URLs and signatures intact; do not manufacture or pin a replacement CDN.
+    if (!selected.length || (selected.length === playurl.stream.length
+      && selected.every((stream, index) => stream === playurl.stream[index]))) return false;
+    playurl.stream = selected;
+    return true;
   }
 
   function patchText(raw) {
     if (typeof raw !== 'string' || raw.length > 2 * 1024 * 1024) return null;
     try {
       const payload = JSON.parse(raw);
-      if (!addFmp4Backup(payload)) return null;
+      if (!preferNativeFlv(payload)) return null;
       return { text: JSON.stringify(payload), json: payload };
     } catch { return null; }
   }
@@ -111,7 +120,7 @@
   function patchEmbedded(value, depth = 0, seen = new WeakSet()) {
     if (!value || typeof value !== 'object' || depth > 6 || seen.has(value)) return;
     seen.add(value);
-    if (addFmp4Backup(value)) reportChange('embeddedResponsesChanged');
+    if (preferNativeFlv(value)) reportChange('embeddedResponsesChanged');
     if (Array.isArray(value)) return;
     for (const key of Object.keys(value)) {
       if (/play|room|data|result|res|info/i.test(key)) patchEmbedded(value[key], depth + 1, seen);
